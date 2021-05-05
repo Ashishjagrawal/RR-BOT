@@ -3,23 +3,43 @@
 
 const { ActivityHandler, MessageFactory } = require('botbuilder');
 
-class RRBot extends ActivityHandler {
-    constructor() {
+const { MakeReservationDialog } = require('./componentDialog/makeReservationDialog')
+
+class RRBOT extends ActivityHandler {
+    constructor(conversationState,userState) {
         super();
+
+        this.conversationState = conversationState;
+        this.userState = userState;
+        this.dialogState = conversationState.createProperty("dialogState");
+        this.makeReservationDialog = new MakeReservationDialog(this.conversationState,this.userState);
+        
+        this.previousIntent = this.conversationState.createProperty("previousIntent");
+        this.conversationData = this.conversationState.createProperty('conservationData');
+        
         // See https://aka.ms/about-bot-activity-message to learn more about the message and other activity types.
         this.onMessage(async (context, next) => {
-            const replyText = `Echo: ${ context.activity.text }`;
-            await context.sendActivity(MessageFactory.text(replyText, replyText));
-            // By calling next() you ensure that the next BotHandler is run.
-            await next();
+        
+        await this.dispatchToIntentAsync(context);
+        
+        await next();
+
         });
 
-        this.onMembersAdded(async (context, next) => {
-           await this.sendWelcomeMessage(context);
+    this.onDialog(async (context, next) => {
+            // Save any state changes. The load happened during the execution of the Dialog.
+            await this.conversationState.saveChanges(context, false);
+            await this.userState.saveChanges(context, false);
+            await next();
+        });   
+    this.onMembersAdded(async (context, next) => {
+            await this.sendWelcomeMessage(context)
             // By calling next() you ensure that the next BotHandler is run.
             await next();
         });
     }
+
+  
 
     async sendWelcomeMessage(turnContext) {
         const { activity } = turnContext;
@@ -38,6 +58,57 @@ class RRBot extends ActivityHandler {
         var reply = MessageFactory.suggestedActions(['Make Reservation','Cancel Reservation','Restaurant Address'],'What would you like to do today ?');
         await turnContext.sendActivity(reply);
     }
+
+
+    async dispatchToIntentAsync(context){
+
+        var currentIntent = '';
+        const previousIntent = await this.previousIntent.get(context,{});
+        const conversationData = await this.conversationData.get(context,{});   
+
+        if(previousIntent.intentName && conversationData.endDialog === false )
+        {
+           currentIntent = previousIntent.intentName;
+
+        }
+        else if (previousIntent.intentName && conversationData.endDialog === true)
+        {
+             currentIntent = context.activity.text;
+
+        }
+        else
+        {
+            currentIntent = context.activity.text;
+            await this.previousIntent.set(context,{intentName: context.activity.text});
+
+        }
+    switch(currentIntent)
+    {
+
+        case 'Make Reservation':
+        console.log("Inside Make Reservation Case");
+        await this.conversationData.set(context,{endDialog: false});
+        await this.makeReservationDialog.run(context,this.dialogState);
+        conversationData.endDialog = await this.makeReservationDialog.isDialogComplete();
+        if(conversationData.endDialog)
+        {
+            await this.sendSuggestedActions(context);
+
+        }
+        
+        break;
+
+        default:
+            console.log("Did not match Make Reservation case");
+            break;
+    }
+
+
+    }
+
+
 }
 
-module.exports.RRBot = RRBot;
+
+
+module.exports.RRBOT = RRBOT;
